@@ -59,3 +59,21 @@ Each entry links to the commit(s) it produced so the git history and prompt log 
 - Commented `wrangler.jsonc` and regenerated the `Env` types.
 
 **Commits:** `feat: rename to rack-readiness-agent, switch to Llama 3.3, strip demo tools`
+
+---
+
+## Prompt 3: Fix Cloudflare Git deploy
+
+> Before proceeding to step 2, ensure that the deployment through cloudflare is functional, I am currently attempting to manually deploy the repo, and I am getting a failed to fetch repo error. To me the repo looks in tact and in good condition to be deployed.
+
+(Follow-up answer to a clarifying question: "Create main (Recommended)": push the current commits to a new `main` branch.)
+
+**Result:**
+- **Diagnosis:** GitHub had no `main` branch. The only branch was the AI assistant's working branch, and GitHub had made it the default because it was pushed first. Cloudflare's Git integration builds from `main` by default, so it had nothing to fetch.
+- **Build check:** confirmed the build works as Cloudflare will run it. `vite build` followed by `wrangler deploy --dry-run` succeeds, with both bindings (the `RackOpsAgent` Durable Object and Workers AI) found.
+- **Fix:** pushed the current history to a new `main` branch.
+- **Cloudflare build settings:**
+  - Build command: `npx vite build`
+  - Deploy command: `npx wrangler deploy`
+  - Production branch: `main`
+- **Commits:** `docs: log prompt 3 (Cloudflare deploy fix)`. The same history was also pushed to `main`.

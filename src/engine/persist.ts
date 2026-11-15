@@ -12,7 +12,13 @@ import {
   type Status
 } from "./readiness";
 
-export type RunTrigger = "seed" | "daily" | "manual";
+/**
+ * seed     = first check after loading data
+ * baseline = reconstructed "last week" snapshot (see agent.ts seed())
+ * daily    = cron schedule
+ * manual   = "run check now" button / chat request
+ */
+export type RunTrigger = "seed" | "baseline" | "daily" | "manual";
 
 export type RunSummary = {
   run_id: number;

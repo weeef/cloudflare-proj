@@ -113,7 +113,7 @@ export const RESULT_SCHEMA: string[] = [
     run_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     run_at   TEXT NOT NULL,          -- ISO timestamp the check ran
     as_of    TEXT NOT NULL,          -- the "today" date it assessed against
-    trigger  TEXT NOT NULL,          -- seed | daily | manual
+    trigger  TEXT NOT NULL,          -- seed | baseline | daily | manual
     total    INTEGER NOT NULL,
     ready    INTEGER NOT NULL,
     at_risk  INTEGER NOT NULL,

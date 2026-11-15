@@ -23,8 +23,11 @@
  * then daily on a cron schedule the agent sets for itself. Results are saved
  * per run and pushed to connected browsers via agent state.
  *
+ * CHAT
+ * Llama 3.3 answers questions through tools (src/tools/) that query the
+ * data. It never computes supply numbers itself.
+ *
  * WHAT GETS ADDED IN LATER STEPS
- *  - step 4: chat tools that query the data
  *  - step 5: kick off / approve the weekly review Workflow
  */
 import { createWorkersAI } from "workers-ai-provider";
@@ -38,7 +41,7 @@ import {
 } from "ai";
 import { DATA_VERSION, MOCK_CSVS } from "./db/data";
 import { RESULT_SCHEMA, SCHEMA } from "./db/schema";
-import { buildSeedRows, toIsoDate, writeSeed } from "./db/seed";
+import { addDays, buildSeedRows, toIsoDate, writeSeed } from "./db/seed";
 import { loadEngineInput, type SqlQuery } from "./engine/load";
 import {
   buildsForRun,
@@ -48,6 +51,15 @@ import {
   type RunTrigger
 } from "./engine/persist";
 import { assessReadiness } from "./engine/readiness";
+import { createChatTools } from "./tools/chat-tools";
+import { weekCalendar } from "./tools/queries";
+
+/**
+ * How many recent messages are sent to the model each turn. All messages are
+ * still stored (maxPersistedMessages); this only bounds the prompt size,
+ * since Llama 3.3's context window is far smaller than a long chat.
+ */
+const MODEL_MESSAGE_WINDOW = 20;
 
 /** Daily readiness check: 06:00 UTC, before the EU workday starts. */
 const DAILY_CHECK_CRON = "0 6 * * *";
@@ -70,13 +82,30 @@ export type AgentState = {
  */
 export const MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
-const SYSTEM_PROMPT = `You are the Rack Build Readiness Agent for a hardware supply chain program manager at a global network operator.
+/**
+ * System prompt, rebuilt on every message so "today" and the week calendar
+ * are always current. Giving the model the calendar lets it translate
+ * "next month" into weeks 1-4 without guessing.
+ */
+function buildSystemPrompt(
+  today: string,
+  calendar: { week: number; build_date: string }[]
+) {
+  const weeks = calendar.map((w) => `W${w.week}=${w.build_date}`).join(", ");
+  return `You are the Rack Build Readiness Agent for a hardware supply chain program manager at a global network operator.
 
-You help with: material readiness for upcoming rack builds (L11 rack integration), supply allocation and shortages of L10 server/network hardware, supplier performance, and allocation tradeoffs (delay a build, ship servers direct instead of fully integrated racks, or reallocate parts from a lower-priority region).
+You help with material readiness for upcoming L11 rack integration builds, supply allocation and shortages of L10 server/network hardware, supplier performance, and allocation tradeoffs (delay a build, ship servers direct instead of fully integrated racks, or reallocate parts from a lower-priority region).
+
+Today is ${today}. Build weeks and their build dates: ${weeks}.
+Regions: FRA Frankfurt, LHR London, AMS Amsterdam (EU); SIN Singapore, NRT Tokyo (APAC); IAD Ashburn, SEA Seattle (NA). Region priority 1 is most critical; SEA is priority 3.
+Statuses: ready, at_risk (parts may land late or inside the 7-day buffer), blocked (parts will not be there by the build date).
 
 Rules:
-- Be concise and specific. Lead with the answer, then the supporting numbers.
-- Never invent part counts, dates, or supplier names. If you do not have data for something, say so.`;
+- For any question about builds, parts, suppliers or changes, call a tool first. Never answer data questions from memory.
+- Never invent part counts, dates, or supplier names. Only use numbers returned by tools.
+- Be concise. Lead with the answer, then the supporting numbers. Use short bullet lists.
+- When you suggest options, name the tradeoff (cost, schedule, which region loses).`;
+}
 
 export class RackOpsAgent extends AIChatAgent<Env, AgentState> {
   initialState: AgentState = { latestRun: null };
@@ -144,7 +173,18 @@ export class RackOpsAgent extends AIChatAgent<Env, AgentState> {
     this.ctx.storage.transactionSync(() => {
       writeSeed((q, ...b) => this.ctx.storage.sql.exec(q, ...b), rows);
     });
-    // Run a first check immediately so the dashboard has data from minute one.
+    // Reconstructed "last week" snapshot: the same data, but with every lot
+    // at its ORIGINAL commit date (before suppliers slipped), dated 7 days
+    // ago. It gives "what changed since last week?" a real answer on a fresh
+    // demo. Labelled trigger = "baseline" so it is never mistaken for a real
+    // check; once real daily runs exist, whatChanged prefers those.
+    const now = new Date();
+    this.runReadinessCheck("baseline", {
+      asOf: addDays(toIsoDate(now), -7),
+      runAt: new Date(now.getTime() - 7 * 86_400_000).toISOString(),
+      asOriginallyPromised: true
+    });
+    // Then today's real check, so the dashboard has data from minute one.
     this.runReadinessCheck("seed");
   }
 
@@ -152,12 +192,20 @@ export class RackOpsAgent extends AIChatAgent<Env, AgentState> {
    * Load -> assess -> save -> broadcast. Pure engine in the middle; this
    * method is just the plumbing around it.
    */
-  private runReadinessCheck(trigger: RunTrigger): RunSummary {
-    const asOf = toIsoDate(new Date());
-    const results = assessReadiness({ asOf, ...loadEngineInput(this.query) });
+  private runReadinessCheck(
+    trigger: RunTrigger,
+    opts: { asOf?: string; runAt?: string; asOriginallyPromised?: boolean } = {}
+  ): RunSummary {
+    const asOf = opts.asOf ?? toIsoDate(new Date());
+    const results = assessReadiness({
+      asOf,
+      ...loadEngineInput(this.query, {
+        asOriginallyPromised: opts.asOriginallyPromised
+      })
+    });
     const run = this.ctx.storage.transactionSync(() =>
       saveRun(this.query, results, {
-        runAt: new Date().toISOString(),
+        runAt: opts.runAt ?? new Date().toISOString(),
         asOf,
         trigger
       })
@@ -228,7 +276,8 @@ export class RackOpsAgent extends AIChatAgent<Env, AgentState> {
 
   /**
    * Called by AIChatAgent every time the user sends a chat message.
-   * We hand the full (pruned) history to Llama 3.3 and stream the reply back.
+   * We hand recent (pruned) history + the data tools to Llama 3.3 and
+   * stream the reply back over the WebSocket.
    */
   async onChatMessage(_onFinish: unknown, options?: OnChatMessageOptions) {
     // workers-ai-provider adapts the Workers AI binding (env.AI) to the
@@ -237,16 +286,20 @@ export class RackOpsAgent extends AIChatAgent<Env, AgentState> {
 
     const result = streamText({
       model: workersai(MODEL),
-      system: SYSTEM_PROMPT,
-      // this.messages = chat history loaded from SQLite (memory).
-      // pruneMessages strips old tool-call payloads to save tokens.
+      system: buildSystemPrompt(
+        toIsoDate(new Date()),
+        weekCalendar(this.query)
+      ),
+      // this.messages = chat history loaded from SQLite (memory). We send the
+      // most recent window; pruneMessages also strips old tool-call payloads
+      // (big JSON results) from earlier turns to save tokens.
       messages: pruneMessages({
-        messages: await convertToModelMessages(this.messages),
+        messages: await convertToModelMessages(
+          this.messages.slice(-MODEL_MESSAGE_WINDOW)
+        ),
         toolCalls: "before-last-2-messages"
       }),
-      tools: {
-        // Data-querying tools are added in step 4.
-      },
+      tools: createChatTools(this.query),
       // Cap the tool-call loop so a confused model can't spin forever.
       stopWhen: stepCountIs(8),
       abortSignal: options?.abortSignal

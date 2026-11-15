@@ -15,11 +15,11 @@ import supply from "../../data/supply.csv?raw";
 import type { SeedCsvs } from "./seed";
 
 /**
- * Bump this whenever any CSV changes. On start-up, an agent seeded with an
+ * Bump this whenever any CSV (or what seeding produces) changes. On start-up, an agent seeded with an
  * older version re-seeds itself, so a deploy with new data takes effect
  * without a manual reset. (Chat history lives in separate tables and is kept.)
  */
-export const DATA_VERSION = "2";
+export const DATA_VERSION = "3"; // 3: seed also records a baseline run
 
 export const MOCK_CSVS: SeedCsvs = {
   regions,

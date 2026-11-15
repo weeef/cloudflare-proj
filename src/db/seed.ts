@@ -15,7 +15,7 @@
  * opens it, instead of a dataset that silently goes stale.
  */
 import { parseCsv } from "./csv";
-import { DATA_TABLES, SCHEMA } from "./schema";
+import { DATA_TABLES, RESULT_SCHEMA, RESULT_TABLES, SCHEMA } from "./schema";
 
 /** Raw CSV text for each input file. */
 export type SeedCsvs = {
@@ -142,13 +142,17 @@ export function buildSeedRows(csv: SeedCsvs, now: Date) {
 export type SeedRows = ReturnType<typeof buildSeedRows>;
 
 /**
- * Create tables (if missing), wipe the input data, insert fresh rows.
+ * Create tables (if missing), wipe input data and old results, insert
+ * fresh rows.
  * The caller should wrap this in a transaction so a failure halfway
  * through never leaves a half-seeded database.
  */
 export function writeSeed(exec: SqlExec, rows: SeedRows) {
-  for (const stmt of SCHEMA) exec(stmt);
-  for (const table of DATA_TABLES) exec(`DELETE FROM ${table}`);
+  for (const stmt of [...SCHEMA, ...RESULT_SCHEMA]) exec(stmt);
+  // Old readiness results refer to the old dates, so a re-seed clears them too.
+  for (const table of [...RESULT_TABLES, ...DATA_TABLES]) {
+    exec(`DELETE FROM ${table}`);
+  }
 
   for (const [key, value] of Object.entries(rows.meta)) {
     exec(`INSERT INTO meta (key, value) VALUES (?, ?)`, key, value);

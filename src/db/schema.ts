@@ -100,3 +100,41 @@ export const DATA_TABLES = [
   "regions",
   "meta"
 ] as const;
+
+/**
+ * Output tables: results of each readiness check.
+ *
+ * Every run is kept (not overwritten), so the agent can answer
+ * "what changed since last week?" by diffing two runs. That history is part
+ * of the agent's memory alongside chat messages and past weekly reviews.
+ */
+export const RESULT_SCHEMA: string[] = [
+  `CREATE TABLE IF NOT EXISTS readiness_runs (
+    run_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_at   TEXT NOT NULL,          -- ISO timestamp the check ran
+    as_of    TEXT NOT NULL,          -- the "today" date it assessed against
+    trigger  TEXT NOT NULL,          -- seed | daily | manual
+    total    INTEGER NOT NULL,
+    ready    INTEGER NOT NULL,
+    at_risk  INTEGER NOT NULL,
+    blocked  INTEGER NOT NULL
+  )`,
+
+  // One row per build per run. issues_json holds the engine's Issue[] so the
+  // UI and LLM get the exact reasons (part, qty, supplier, days).
+  `CREATE TABLE IF NOT EXISTS build_status (
+    run_id      INTEGER NOT NULL REFERENCES readiness_runs(run_id),
+    build_id    TEXT NOT NULL,
+    region      TEXT NOT NULL,
+    week        INTEGER NOT NULL,
+    rack_type   TEXT NOT NULL,
+    racks       INTEGER NOT NULL,
+    build_date  TEXT NOT NULL,
+    status      TEXT NOT NULL CHECK (status IN ('ready', 'at_risk', 'blocked')),
+    issues_json TEXT NOT NULL,
+    PRIMARY KEY (run_id, build_id)
+  )`
+];
+
+/** Output tables, children first (safe delete order). */
+export const RESULT_TABLES = ["build_status", "readiness_runs"] as const;

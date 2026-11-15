@@ -46,7 +46,7 @@ describe("seed", () => {
     expect(count("bom")).toBe(21);
     expect(count("forecast")).toBe(40);
     expect(count("suppliers")).toBe(7);
-    expect(count("supply")).toBe(33);
+    expect(count("supply")).toBe(35);
   });
 
   it("anchors week 1 to the coming Monday and builds on Thursdays", () => {

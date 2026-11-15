@@ -96,3 +96,35 @@ Each entry links to the commit(s) it produced so the git history and prompt log 
 - **Tests:** added Vitest. The seed tests run the real schema against in-memory SQLite (`node:sqlite`) with foreign keys enforced.
 
 **Commits:** `feat: mock supply-chain CSVs and SQLite seeding`
+
+---
+
+## Prompt 5: Step 3, readiness engine + daily schedule
+
+> Go ahead with step 3, is the CSV bundling necessary?
+
+**Answer to the question:** bundling isn't strictly necessary, but it's the simplest way to meet "CSV seeded into the agent's SQL storage". The alternatives were hardcoded TypeScript arrays, fetching the files from static assets at startup, an R2 bucket, or D1. Each adds setup or moves state out of the agent for no demo benefit. In a real version, a scheduled job would load ERP or supplier-portal exports into the same tables, and the engine wouldn't change.
+
+**Result:**
+- **Engine:** `src/engine/readiness.ts` is a pure, deterministic engine (no LLM). Builds are processed by date, then region priority. Each build draws parts FIFO from supply lots and is graded `ready`, `at_risk` or `blocked`, with typed issues:
+  - `shortage`: nothing committed at all
+  - `late_commit`: the commit lands after the build date
+  - `thin_buffer`: lands inside the 7-day buffer
+  - `unreliable_supplier`: a risk-adjusted date (commit + the supplier's average slip) eats the buffer
+  - `overdue_commit`: the commit date has passed but the parts aren't received
+- **Persistence:** `src/engine/load.ts` and `src/engine/persist.ts` read inputs and save each run (`readiness_runs` + `build_status` tables). Every run is kept so later steps can diff them ("what changed").
+- **Agent:**
+  - runs a check right after seeding
+  - schedules itself daily with cron `0 6 * * *` (SDK cron schedules are idempotent, so this is safe in `onStart`)
+  - pushes the latest run summary to browsers through agent state
+  - new methods the UI can call: `runReadinessCheckNow()` and `getLatestReadiness()`
+- **Data tuning:**
+  - The first run was 18 blocked / 18 at risk / 4 ready, because reliable suppliers' commits landed on top of build dates. I re-timed them, which left the problems in Nexwave (switches) and Lumora (optics).
+  - I also replaced a blunt "any unreliable supplier = risk" rule with the risk-adjusted date.
+  - Result: 10 ready / 22 at risk / 8 blocked.
+- **Bug found and fixed:** a live run on a Sunday showed stock already on hand being flagged as "thin buffer". On-hand parts can't arrive late, so they are now exempt. Added a regression test.
+- **Verification:**
+  - 27 unit tests passing.
+  - Ran the real Durable Object locally, with the AI binding temporarily removed since Workers AI needs a login. Confirmed: seed, check on seed, manual check, reset and the callable methods all work.
+
+**Commits:** `feat: deterministic readiness engine, run history, daily schedule`

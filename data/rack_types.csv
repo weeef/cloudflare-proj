@@ -1,0 +1,4 @@
+rack_type,description
+COMPUTE,General compute rack (36x 1U servers)
+STORAGE,Storage rack (16x 2U storage servers)
+EDGE,Network-edge rack (switch/optic heavy)

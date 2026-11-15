@@ -77,3 +77,22 @@ Each entry links to the commit(s) it produced so the git history and prompt log 
   - Deploy command: `npx wrangler deploy`
   - Production branch: `main`
 - **Commits:** `docs: log prompt 3 (Cloudflare deploy fix)`. The same history was also pushed to `main`.
+
+---
+
+## Prompt 4: Step 2, mock data + seeding
+
+> Deploy worked, go ahead with step 2
+
+**Result:**
+- **Mock data:** added `data/*.csv`: 7 regions, 8 parts, 3 rack types with their BOMs, 40 forecast builds over 8 weeks, 7 fictional suppliers and 33 supply lots.
+- **Dates:** stored as day offsets from week 1. Seeding converts them to real dates, with week 1 = the coming Monday, so the demo always shows the next 8 weeks.
+- **Designed problems:**
+  - Nexwave Networks (68% on-time) slipped every top-of-rack switch commit, so the week 3 builds come up short.
+  - Lumora Photonics (72% on-time) commits optics that land just after several build dates.
+  - A few commits land inside the 7-day buffer, which makes those builds "at risk".
+- **Code:** `src/db/` holds the CSV parser, the schema, the pure seed logic and the CSV imports.
+- **Agent:** seeds the data on first start, inside a single transaction. Two new methods the UI can call: `getDataSummary()` and `resetDemoData()`.
+- **Tests:** added Vitest. The seed tests run the real schema against in-memory SQLite (`node:sqlite`) with foreign keys enforced.
+
+**Commits:** `feat: mock supply-chain CSVs and SQLite seeding`

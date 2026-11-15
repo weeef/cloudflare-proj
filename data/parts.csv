@@ -1,0 +1,9 @@
+part_number,description,category,direct_ship_ok
+SRV-C1,Compute server 1U (gen12),server,1
+SRV-S1,Storage server 2U 24-bay,server,1
+SW-TOR-100G,100G top-of-rack switch,switch,0
+SW-MGMT-1G,1G management switch,switch,0
+PDU-3PH,3-phase 32A PDU,pdu,0
+OPT-100G-SR4,100G SR4 optic,optics,0
+CBL-DAC-25G,25G DAC cable 3m,cable,0
+RACK-48U,48U rack frame,frame,0

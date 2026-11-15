@@ -1,0 +1,8 @@
+code,name,geo,priority
+FRA,Frankfurt,EU,1
+LHR,London,EU,1
+AMS,Amsterdam,EU,2
+SIN,Singapore,APAC,1
+NRT,Tokyo,APAC,2
+IAD,Ashburn,NA,1
+SEA,Seattle,NA,3

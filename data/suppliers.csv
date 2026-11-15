@@ -1,0 +1,8 @@
+supplier_id,name,country,on_time_pct,avg_slip_days
+ARD,Ardent Compute,TW,96,1
+NXW,Nexwave Networks,US,68,11
+ORB,Orbit Switching,SG,91,2
+VLT,Voltline Power,MX,93,2
+LUM,Lumora Photonics,CN,72,8
+KBW,Kabelwerk Nord,DE,97,1
+FRM,FrameCo Industries,MY,90,3

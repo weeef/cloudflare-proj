@@ -65,7 +65,7 @@ function int(row: Record<string, string>, col: string): number {
   return n;
 }
 
-export function buildSeedRows(csv: SeedCsvs, now: Date) {
+export function buildSeedRows(csv: SeedCsvs, now: Date, dataVersion = "dev") {
   const week1Start = nextMonday(now);
 
   const regions = parseCsv(csv.regions).map((r) => ({
@@ -128,7 +128,11 @@ export function buildSeedRows(csv: SeedCsvs, now: Date) {
   });
 
   return {
-    meta: { seeded_at: now.toISOString(), week1_start: week1Start },
+    meta: {
+      seeded_at: now.toISOString(),
+      week1_start: week1Start,
+      data_version: dataVersion
+    },
     regions,
     parts,
     rackTypes,

@@ -36,7 +36,8 @@ import {
   stepCountIs,
   streamText
 } from "ai";
-import { MOCK_CSVS } from "./db/data";
+import { DATA_VERSION, MOCK_CSVS } from "./db/data";
+import { RESULT_SCHEMA, SCHEMA } from "./db/schema";
 import { buildSeedRows, toIsoDate, writeSeed } from "./db/seed";
 import { loadEngineInput, type SqlQuery } from "./engine/load";
 import {
@@ -90,10 +91,21 @@ export class RackOpsAgent extends AIChatAgent<Env, AgentState> {
   /**
    * Runs whenever the Durable Object wakes up (first request, or after
    * Cloudflare evicted it from memory while idle). The SQLite data persists
-   * across wake-ups, so we only seed if the database is empty.
+   * across wake-ups, so we only seed if the database is empty or was seeded
+   * from an older version of the CSVs.
    */
   async onStart() {
-    if (!this.isSeeded()) this.seed();
+    if (!this.isSeeded()) {
+      this.seed();
+    } else {
+      // Schema upgrades: CREATE TABLE IF NOT EXISTS is a no-op for tables
+      // that exist, so this safely adds tables introduced in newer versions
+      // to an agent that was seeded by an older deploy.
+      for (const stmt of [...SCHEMA, ...RESULT_SCHEMA]) {
+        this.ctx.storage.sql.exec(stmt);
+      }
+      if (!latestRun(this.query)) this.runReadinessCheck("seed");
+    }
 
     // Cron schedules are idempotent in the Agents SDK: calling this on every
     // wake-up returns the existing schedule instead of adding duplicates.
@@ -110,13 +122,16 @@ export class RackOpsAgent extends AIChatAgent<Env, AgentState> {
   private query: SqlQuery = (q, ...b) =>
     this.ctx.storage.sql.exec(q, ...b).toArray() as never[];
 
-  /** True once the meta table exists and records a seed time. */
+  /** True once seeded with the CSV version this code ships with. */
   private isSeeded(): boolean {
     const rows = this.sql<{ n: number }>`
       SELECT COUNT(*) AS n FROM sqlite_master
       WHERE type = 'table' AND name = 'meta'`;
     if (rows[0].n === 0) return false;
-    return this.sql`SELECT value FROM meta WHERE key = 'seeded_at'`.length > 0;
+    const [row] = this.sql<{
+      value: string;
+    }>`SELECT value FROM meta WHERE key = 'data_version'`;
+    return row?.value === DATA_VERSION;
   }
 
   /**
@@ -125,7 +140,7 @@ export class RackOpsAgent extends AIChatAgent<Env, AgentState> {
    * every change is rolled back and we never serve half-loaded data.
    */
   private seed() {
-    const rows = buildSeedRows(MOCK_CSVS, new Date());
+    const rows = buildSeedRows(MOCK_CSVS, new Date(), DATA_VERSION);
     this.ctx.storage.transactionSync(() => {
       writeSeed((q, ...b) => this.ctx.storage.sql.exec(q, ...b), rows);
     });

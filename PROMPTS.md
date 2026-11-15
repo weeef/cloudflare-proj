@@ -127,4 +127,9 @@ Each entry links to the commit(s) it produced so the git history and prompt log 
   - 27 unit tests passing.
   - Ran the real Durable Object locally, with the AI binding temporarily removed since Workers AI needs a login. Confirmed: seed, check on seed, manual check, reset and the callable methods all work.
 
-**Commits:** `feat: deterministic readiness engine, run history, daily schedule`
+- **Upgrade fix (same prompt):** caught before handing back. An agent already seeded by step 2 would skip seeding on this deploy, so it would have no results tables and would keep the old data. Two fixes:
+  - `onStart` now creates any missing tables.
+  - A `DATA_VERSION` stored in `meta` makes the agent re-seed automatically when the CSVs change. Chat history is untouched.
+  - Verified by seeding a local agent with the step 2 code, then starting the new code against the same stored data.
+
+**Commits:** `feat: deterministic readiness engine, run history, daily schedule`, `fix: upgrade path for agents seeded by an older deploy`

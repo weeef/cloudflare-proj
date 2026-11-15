@@ -1,8 +1,8 @@
 {
-  "name": "agent-starter",
+  "name": "rack-readiness-agent",
   "version": "1.0.0",
   "private": true,
-  "description": "Starter template for building AI chat agents on Cloudflare",
+  "description": "AI agent that checks material readiness for data center rack builds and drafts weekly shortage reviews",
   "keywords": [
     "agents",
     "ai",

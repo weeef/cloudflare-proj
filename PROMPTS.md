@@ -45,3 +45,17 @@ Each entry links to the commit(s) it produced so the git history and prompt log 
 **Result:** Found the GitHub repo completely empty (no branches, no commits), which is why the Cloudflare Git build failed at "Cloning repository". Committed the unmodified `cloudflare/agents-starter` template as the baseline and verified it builds. Proposed the file structure + data model for approval.
 
 **Commits:** `chore: add cloudflare/agents-starter template as baseline`
+
+---
+
+## Prompt 2: Approve plan, start step 1
+
+> Approved, go ahead with step 1 and log my reply
+
+**Result:** Step 1 of the approved plan.
+- Renamed the project and Worker to `rack-readiness-agent`.
+- Moved the agent into `src/agent.ts` as `RackOpsAgent` and switched the model to `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, with a supply-chain system prompt.
+- Removed the starter's demo tools (weather, timezone, calculator, scheduler) and MCP server support, from both the agent and the UI.
+- Commented `wrangler.jsonc` and regenerated the `Env` types.
+
+**Commits:** `feat: rename to rack-readiness-agent, switch to Llama 3.3, strip demo tools`

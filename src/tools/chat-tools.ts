@@ -22,6 +22,7 @@ import {
   listProblemBuilds,
   readinessOverview,
   supplierScorecard,
+  weeklyReview,
   whatChanged
 } from "./queries";
 
@@ -88,6 +89,15 @@ export function createChatTools(query: SqlQuery) {
         "Compare the latest readiness check against the one from about a week earlier: builds that got better or worse, count deltas, and the supplier commit slips behind them. Use for 'what changed since last week'.",
       inputSchema: z.object({}),
       execute: async () => whatChanged(query)
+    }),
+
+    getWeeklyReview: tool({
+      description:
+        "The weekly shortage review sent to leadership: full report, its approval status and decision note, and the supplier escalation emails. Use 'previous' to see the review before the latest one.",
+      inputSchema: z.object({
+        which: opt(z.enum(["latest", "previous"])).describe("Default latest.")
+      }),
+      execute: async ({ which }) => weeklyReview(query, which ?? "latest")
     })
   };
 }

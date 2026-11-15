@@ -23,6 +23,7 @@ import {
   type StoredBuildStatus
 } from "../engine/persist";
 import type { Status } from "../engine/readiness";
+import { getReview, listReviews } from "../review/store";
 
 export type Geo = "EU" | "APAC" | "NA";
 
@@ -408,4 +409,38 @@ function pick<T extends object, K extends keyof T>(
   keys: K[]
 ): Pick<T, K> {
   return Object.fromEntries(keys.map((k) => [k, obj[k]])) as Pick<T, K>;
+}
+
+// ── 6. weekly reviews (long-term memory) ────────────────────────────────
+
+/**
+ * A past weekly review: the report that went to leadership and what was
+ * decided. Together with chat history and run history, this is how the
+ * agent "remembers" previous weeks.
+ */
+export function weeklyReview(query: SqlQuery, which: "latest" | "previous") {
+  const reviews = listReviews(query, 2);
+  const pick = which === "previous" ? reviews[1] : reviews[0];
+  if (!pick) {
+    return {
+      error:
+        which === "previous"
+          ? "There is no earlier weekly review yet."
+          : "No weekly review has been run yet. The user can start one from the dashboard."
+    };
+  }
+  const r = getReview(query, pick.review_id)!;
+  return {
+    review_id: r.review_id,
+    created_at: r.created_at,
+    status: r.status,
+    decided_at: r.decided_at,
+    decision_note: r.decision_note,
+    report_markdown: r.report_md ?? "(report still being drafted)",
+    supplier_emails: r.emails.map((e) => ({
+      supplier: e.supplier_name,
+      subject: e.subject,
+      status: e.status
+    }))
+  };
 }

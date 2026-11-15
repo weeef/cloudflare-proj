@@ -188,3 +188,34 @@ Each entry links to the commit(s) it produced so the git history and prompt log 
 - **Process change:** every commit from now on is gated on `npm run check && npm test`, the same as CI.
 
 **Commits:** `ci: fix sanity check (formatting), Node 24 actions, run tests in CI`
+
+**Step 5 (same prompt): weekly review Workflow with human approval**
+
+- **What-if options:** `src/engine/options.ts` computes allocation options for each blocked build by re-running the deterministic engine on modified inputs. The LLM only explains options the engine has confirmed.
+  - **Delay:** the smallest delay that unblocks the build (or "needs a new PO" when nothing is committed).
+  - **Reallocate:** defer a lower-priority build that uses the same part, kept only if it actually unblocks; knock-on impacts are reported.
+  - **Ship direct:** which parts can skip L11 integration.
+  - All 8 blocked builds take 37 ms. Limitation: it tries one donor at a time, not combinations.
+- **Facts pack:** `src/review/facts.ts` builds the only data the LLM sees: totals, change vs last week, options, and which suppliers to escalate. Escalation means slipped commits _and_ hurting builds now, so Orbit (reliable, just next in the queue) is excluded. The facts are stored with each review for audit.
+- **Prompts:** `src/llm/prompts.ts` holds the report and email prompts (temperature 0.2, "use only these facts"), plus a deterministic fallback report and email so an AI outage never blocks the approval queue.
+- **Workflow:** `src/workflows/weekly-review.ts` is `WeeklyReviewWorkflow extends AgentWorkflow`, with durable steps: compute, report (retried, then fallback), one email per supplier, save draft, `waitForApproval` (7-day timeout), then approved / rejected / expired. Nothing is "sent" without approval.
+- **Approval queue:** `src/review/store.ts` holds the `weekly_reviews` table. Status changes are guarded, so retries and double-clicks can't move a review backwards.
+- **Agent:**
+  - browser-callable methods: `startWeeklyReview`, `approveReview`, `rejectReview`, `getReviews`, `getReviewDetail`
+  - methods only the workflow can reach (over RPC): `prepareWeeklyReview`, `saveWeeklyReviewDraft`, `finalizeWeeklyReview`
+  - `onWorkflowError` hook
+  - weekly cron `0 7 * * 1`
+  - the review row is created before the workflow starts, so a double-click is refused
+- **Chat:** new `getWeeklyReview` tool gives access to past reports and decisions (memory).
+- **Bugs found by running the real workflow locally (fallback path, no AI):**
+  - `waitForApproval` returns the approval's `metadata`, not `reason`, so the note was lost.
+  - The SDK reports a rejection as a workflow error, so rejections showed as "failed". The agent now records the rejection before signalling the workflow.
+  - A missing AI binding was being retried with backoff. It now throws `NonRetryableError`.
+  - The try/catch around the approval wait also caught failures from a later step. It's now narrowed to the wait only.
+- **Verified:**
+  - 57 tests pass, and `npm run check` is clean.
+  - Locally: start → double-click refused → fallback draft and 2 emails → approve (note kept, emails released) → start → reject (note kept, emails discarded).
+  - `wrangler deploy --dry-run` shows the `WEEKLY_REVIEW` Workflow binding.
+  - The live Llama report/email quality can only be checked on Cloudflare.
+
+**Commits (step 5):** `feat: weekly review Workflow with engine-verified options and human approval`

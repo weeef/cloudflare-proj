@@ -113,7 +113,7 @@ export const RESULT_SCHEMA: string[] = [
     run_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     run_at   TEXT NOT NULL,          -- ISO timestamp the check ran
     as_of    TEXT NOT NULL,          -- the "today" date it assessed against
-    trigger  TEXT NOT NULL,          -- seed | baseline | daily | manual
+    trigger  TEXT NOT NULL,          -- seed | baseline | daily | manual | weekly
     total    INTEGER NOT NULL,
     ready    INTEGER NOT NULL,
     at_risk  INTEGER NOT NULL,
@@ -133,8 +133,31 @@ export const RESULT_SCHEMA: string[] = [
     status      TEXT NOT NULL CHECK (status IN ('ready', 'at_risk', 'blocked')),
     issues_json TEXT NOT NULL,
     PRIMARY KEY (run_id, build_id)
+  )`,
+
+  // Weekly shortage reviews: one row per Workflow run. This table is both the
+  // approval queue (status = pending_approval) and long-term memory of what
+  // was reported to leadership each week.
+  `CREATE TABLE IF NOT EXISTS weekly_reviews (
+    review_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_id   TEXT NOT NULL UNIQUE,  -- Cloudflare Workflow instance id
+    created_at    TEXT NOT NULL,
+    trigger       TEXT NOT NULL,         -- weekly | manual
+    run_id        INTEGER,               -- readiness run the review is based on
+    status        TEXT NOT NULL CHECK (status IN
+                    ('drafting', 'pending_approval', 'approved', 'rejected', 'expired', 'failed')),
+    facts_json    TEXT,                  -- exactly what the LLM was given (auditable)
+    report_md     TEXT,                  -- leadership report (Markdown)
+    report_source TEXT,                  -- llm | fallback
+    emails_json   TEXT,                  -- supplier escalation drafts
+    decided_at    TEXT,
+    decision_note TEXT
   )`
 ];
 
 /** Output tables, children first (safe delete order). */
-export const RESULT_TABLES = ["build_status", "readiness_runs"] as const;
+export const RESULT_TABLES = [
+  "weekly_reviews",
+  "build_status",
+  "readiness_runs"
+] as const;

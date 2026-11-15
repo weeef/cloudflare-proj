@@ -27,8 +27,13 @@
  * Llama 3.3 answers questions through tools (src/tools/) that query the
  * data. It never computes supply numbers itself.
  *
- * WHAT GETS ADDED IN LATER STEPS
- *  - step 5: kick off / approve the weekly review Workflow
+ * WEEKLY REVIEW (human in the loop)
+ * Every Monday (or on demand) the agent starts WeeklyReviewWorkflow
+ * (src/workflows/weekly-review.ts). The workflow calls back into this agent
+ * over RPC to compute facts and save drafts, then pauses until a human
+ * approves or rejects from the UI. Browser-facing actions are @callable;
+ * workflow-facing methods are plain public methods, reachable over RPC from
+ * our own Worker code but NOT from the browser.
  */
 import { createWorkersAI } from "workers-ai-provider";
 import { callable } from "agents";
@@ -51,6 +56,19 @@ import {
   type RunTrigger
 } from "./engine/persist";
 import { assessReadiness } from "./engine/readiness";
+import { MODEL } from "./llm/model";
+import { buildReviewFacts } from "./review/facts";
+import {
+  attachFacts,
+  createReview,
+  decide,
+  getReview,
+  listReviews,
+  openReview,
+  saveDraft,
+  type EmailDraft,
+  type ReviewStatus
+} from "./review/store";
 import { createChatTools } from "./tools/chat-tools";
 import { weekCalendar } from "./tools/queries";
 
@@ -64,6 +82,17 @@ const MODEL_MESSAGE_WINDOW = 20;
 /** Daily readiness check: 06:00 UTC, before the EU workday starts. */
 const DAILY_CHECK_CRON = "0 6 * * *";
 
+/** Weekly shortage review: Mondays 07:00 UTC, after that day's check. */
+const WEEKLY_REVIEW_CRON = "0 7 * * 1";
+
+/** Small summary of a review, pushed to browsers in agent state. */
+export type ReviewSummary = {
+  review_id: number;
+  status: ReviewStatus;
+  created_at: string;
+  decided_at: string | null;
+};
+
 /**
  * Agent state is a small JSON object the SDK keeps in sync with every
  * connected browser: setState() on the server pushes the new value to all
@@ -73,14 +102,8 @@ const DAILY_CHECK_CRON = "0 6 * * *";
  */
 export type AgentState = {
   latestRun: RunSummary | null;
+  latestReview: ReviewSummary | null;
 };
-
-/**
- * The model the assignment recommends. "fp8-fast" is an 8-bit quantised build
- * of Llama 3.3 70B tuned for low latency on Workers AI. It supports tool
- * (function) calling, which the chat tools in step 4 rely on.
- */
-export const MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 /**
  * System prompt, rebuilt on every message so "today" and the week calendar
@@ -104,11 +127,12 @@ Rules:
 - For any question about builds, parts, suppliers or changes, call a tool first. Never answer data questions from memory.
 - Never invent part counts, dates, or supplier names. Only use numbers returned by tools.
 - Be concise. Lead with the answer, then the supporting numbers. Use short bullet lists.
-- When you suggest options, name the tradeoff (cost, schedule, which region loses).`;
+- When you suggest options, name the tradeoff (cost, schedule, which region loses).
+- For questions about the weekly review report, what was reported to leadership, or what was decided, use getWeeklyReview.`;
 }
 
 export class RackOpsAgent extends AIChatAgent<Env, AgentState> {
-  initialState: AgentState = { latestRun: null };
+  initialState: AgentState = { latestRun: null, latestReview: null };
 
   // Keep the last 100 chat messages in SQLite. Older ones are dropped so the
   // prompt we send to the LLM doesn't grow forever.
@@ -141,6 +165,7 @@ export class RackOpsAgent extends AIChatAgent<Env, AgentState> {
     // The SDK stores schedules in SQLite and uses a Durable Object alarm to
     // wake the agent at the right time, so no separate cron Worker is needed.
     await this.schedule(DAILY_CHECK_CRON, "runDailyReadinessCheck");
+    await this.schedule(WEEKLY_REVIEW_CRON, "runScheduledWeeklyReview");
   }
 
   /**
@@ -230,6 +255,155 @@ export class RackOpsAgent extends AIChatAgent<Env, AgentState> {
   getLatestReadiness() {
     const run = latestRun(this.query);
     return run ? { run, builds: buildsForRun(this.query, run.run_id) } : null;
+  }
+
+  // ── weekly review: browser-facing (@callable) ─────────────────────────
+
+  /**
+   * Start a weekly review workflow. Refuses if one is already open, so the
+   * approval queue never holds two competing drafts.
+   *
+   * The review row is inserted synchronously BEFORE starting the workflow:
+   * a Durable Object processes one event at a time, so a double-click's
+   * second call sees this row and is refused.
+   */
+  @callable()
+  async startWeeklyReview(trigger: "weekly" | "manual" = "manual") {
+    const open = openReview(this.query);
+    if (open) {
+      return {
+        started: false,
+        reason: `Review #${open.review_id} is still ${open.status}. Approve or reject it first.`,
+        review_id: open.review_id
+      };
+    }
+    const workflowId = crypto.randomUUID();
+    const review = createReview(this.query, { workflowId, trigger });
+    this.publishReview(review);
+    try {
+      await this.runWorkflow("WEEKLY_REVIEW", { trigger }, { id: workflowId });
+    } catch (err) {
+      this.publishReview(decide(this.query, workflowId, "failed", String(err)));
+      throw err;
+    }
+    return { started: true, review_id: review.review_id };
+  }
+
+  /** Called by the weekly cron schedule. */
+  async runScheduledWeeklyReview() {
+    await this.startWeeklyReview("weekly");
+  }
+
+  /**
+   * Human decision from the approval queue. For approval we don't update
+   * the row here: we send the decision to the paused workflow, and ITS next
+   * step records it and releases the emails.
+   */
+  @callable()
+  async approveReview(reviewId: number, note?: string) {
+    const review = this.requirePending(reviewId);
+    // waitForApproval() hands the workflow the `metadata` object, so the
+    // note travels there.
+    await this.approveWorkflow(review.workflow_id, {
+      reason: note,
+      metadata: { note }
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Rejection is recorded HERE, before signalling the workflow. The SDK's
+   * waitForApproval() reports a rejection as a workflow error (which fires
+   * onWorkflowError), so recording it first makes the outcome "rejected",
+   * and the later workflow step / error hook are harmless no-ops.
+   */
+  @callable()
+  async rejectReview(reviewId: number, note?: string) {
+    const review = this.requirePending(reviewId);
+    this.publishReview(
+      decide(this.query, review.workflow_id, "rejected", note)
+    );
+    await this.rejectWorkflow(review.workflow_id, { reason: note });
+    return { ok: true };
+  }
+
+  /** Approval queue / history (newest first, without the bulky facts). */
+  @callable()
+  getReviews() {
+    return listReviews(this.query);
+  }
+
+  /** One review in full: report, email drafts, and the facts the LLM saw. */
+  @callable()
+  getReviewDetail(reviewId: number) {
+    return getReview(this.query, reviewId);
+  }
+
+  private requirePending(reviewId: number) {
+    const review = getReview(this.query, reviewId);
+    if (!review) throw new Error(`Review ${reviewId} not found`);
+    if (review.status !== "pending_approval") {
+      throw new Error(
+        `Review ${reviewId} is ${review.status}, not pending approval`
+      );
+    }
+    return review;
+  }
+
+  // ── weekly review: workflow-facing (RPC from WeeklyReviewWorkflow) ────
+
+  /** Workflow step 1: fresh readiness check + facts pack (as JSON) for the LLM. */
+  async prepareWeeklyReview(workflowId: string) {
+    const run = this.runReadinessCheck("weekly");
+    const facts = buildReviewFacts(this.query, run.as_of);
+    attachFacts(this.query, workflowId, run.run_id, facts);
+    return JSON.stringify(facts);
+  }
+
+  /** Workflow step 4: draft is ready, put it in the approval queue. */
+  async saveWeeklyReviewDraft(
+    workflowId: string,
+    draft: {
+      reportMd: string;
+      reportSource: "llm" | "fallback";
+      emails: EmailDraft[];
+    }
+  ) {
+    this.publishReview(saveDraft(this.query, workflowId, draft));
+  }
+
+  /** Workflow step 6: record the outcome. */
+  async finalizeWeeklyReview(
+    workflowId: string,
+    status: "approved" | "rejected" | "expired",
+    note?: string
+  ) {
+    this.publishReview(decide(this.query, workflowId, status, note));
+  }
+
+  /** SDK hook: a workflow this agent started threw an unhandled error. */
+  async onWorkflowError(_name: string, workflowId: string, error: string) {
+    const review = decide(this.query, workflowId, "failed", error);
+    // A rejection also arrives here (the SDK reports it as an error), but the
+    // review is already "rejected" so decide() was a no-op. Only log real failures.
+    if (review?.status === "failed") {
+      console.error(`Workflow ${workflowId} failed:`, error);
+    }
+    this.publishReview(review);
+  }
+
+  /** Push the review's new status to every connected browser. */
+  private publishReview(review: ReturnType<typeof getReview>) {
+    if (!review) return;
+    this.setState({
+      ...this.state,
+      latestReview: {
+        review_id: review.review_id,
+        status: review.status,
+        created_at: review.created_at,
+        decided_at: review.decided_at
+      }
+    });
   }
 
   /**

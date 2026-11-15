@@ -17,8 +17,9 @@ import {
  * baseline = reconstructed "last week" snapshot (see agent.ts seed())
  * daily    = cron schedule
  * manual   = "run check now" button / chat request
+ * weekly   = fresh check at the start of a weekly review workflow
  */
-export type RunTrigger = "seed" | "baseline" | "daily" | "manual";
+export type RunTrigger = "seed" | "baseline" | "daily" | "manual" | "weekly";
 
 export type RunSummary = {
   run_id: number;

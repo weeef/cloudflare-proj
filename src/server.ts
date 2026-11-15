@@ -11,9 +11,10 @@
  */
 import { routeAgentRequest } from "agents";
 
-// Durable Object classes must be exported from the entry module so the
+// Durable Object and Workflow classes must be exported from the entry module so the
 // runtime can find them by the class_name in wrangler.jsonc.
 export { RackOpsAgent } from "./agent";
+export { WeeklyReviewWorkflow } from "./workflows/weekly-review";
 
 export default {
   async fetch(request: Request, env: Env) {

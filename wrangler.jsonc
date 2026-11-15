@@ -24,6 +24,17 @@
     "bindings": [{ "class_name": "RackOpsAgent", "name": "RackOpsAgent" }]
   },
 
+  // Cloudflare Workflow for the weekly shortage review. "binding" is the env
+  // name the agent passes to runWorkflow(); "class_name" is exported from
+  // src/server.ts.
+  "workflows": [
+    {
+      "name": "weekly-review",
+      "binding": "WEEKLY_REVIEW",
+      "class_name": "WeeklyReviewWorkflow"
+    }
+  ],
+
   // new_sqlite_classes gives the Durable Object its own SQLite database
   // (where mock data, readiness results, reports and chat history live).
   "migrations": [{ "new_sqlite_classes": ["RackOpsAgent"], "tag": "v1" }]

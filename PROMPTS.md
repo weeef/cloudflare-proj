@@ -12,16 +12,19 @@ Each entry links to the commit(s) it produced so the git history and prompt log 
 > **Who I am / why this exists.** I'm Jordan Bastian, applying for Cloudflare's Senior Supply Chain Program Manager – Rack Integration role (Hardware Integration Ops, Infrastructure Engineering). The application has an optional assignment: build an AI-powered app on Cloudflare and they fast-track you. My current job is program operations at Element Fleet Management supporting Amazon's Armada program across 15+ Amazon DSP sites — parts orders/requisitions, chasing unfilled orders, vendor performance reviews, Excel/Power BI reporting. The idea is an agent that automates a slice of the Cloudflare job, which is the same kind of work I already do, applied to data center hardware.
 >
 > **Assignment requirements** (from Cloudflare, must all be clearly present)
+>
 > 1. LLM — recommended Llama 3.3 on Workers AI (@cf/meta/llama-3.3-70b-instruct-fp8-fast)
 > 2. Workflow / coordination — Workflows, Workers, or Durable Objects
 > 3. User input via chat or voice — Pages or Realtime
 > 4. Memory or state
+>
 > - AI-assisted coding is encouraged, but I MUST submit prompt history. Log every prompt I send in PROMPTS.md as we go (I'll paste them; remind me if I forget).
 > - Docs: https://developers.cloudflare.com/agents/
 >
 > **The role (what the agent should mirror).** The job owns the supply-planning interface between capacity demand, L10 server/network hardware supply, and L11 full-rack integration at global integration partners. Key duties: weekly supply allocation reporting and shortage reviews, material-readiness assessments for upcoming rack builds, presenting allocation options/tradeoffs to Capacity Planning (incl. direct hardware ship vs. full rack integration), supplier business reviews (capacity, delivery, cost, quality), supply risk (bottlenecks, logistics, tariffs, regional concentration), executive reporting.
 >
 > **What to build**
+>
 > - Mock data (CSV, seeded into the agent's SQL storage):
 >   - forecast: racks needed by region × week (6–8 regions like FRA, SIN, IAD, SEA, LHR, NRT; next 8 weeks)
 >   - BOM: 2–3 rack types, parts + qty (servers, switches, PDUs, optics, cables…)
@@ -35,6 +38,7 @@ Each entry links to the commit(s) it produced so the git history and prompt log 
 > **Repo / current state.** Repo: github.com/weeef/cloudflare-proj, created from the agents-starter template. Cloudflare dashboard Git-connected build failed at "Cloning repository" (fetching repository failed). Likely the repo was empty / no commits on main, or the Cloudflare GitHub app lacks repo access. Not blocking — deploying with wrangler from CLI works too. First task: check the repo state and get a clean starter committed + running.
 >
 > **Constraints / how I want to work**
+>
 > - Weekend-sized scope. Mock data, no auth.
 > - Plan first: show file structure + data model before coding, let me approve.
 > - Build in small steps, commit after each (git history should match the prompt log).
@@ -53,6 +57,7 @@ Each entry links to the commit(s) it produced so the git history and prompt log 
 > Approved, go ahead with step 1 and log my reply
 
 **Result:** Step 1 of the approved plan.
+
 - Renamed the project and Worker to `rack-readiness-agent`.
 - Moved the agent into `src/agent.ts` as `RackOpsAgent` and switched the model to `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, with a supply-chain system prompt.
 - Removed the starter's demo tools (weather, timezone, calculator, scheduler) and MCP server support, from both the agent and the UI.
@@ -69,6 +74,7 @@ Each entry links to the commit(s) it produced so the git history and prompt log 
 (Follow-up answer to a clarifying question: "Create main (Recommended)": push the current commits to a new `main` branch.)
 
 **Result:**
+
 - **Diagnosis:** GitHub had no `main` branch. The only branch was the AI assistant's working branch, and GitHub had made it the default because it was pushed first. Cloudflare's Git integration builds from `main` by default, so it had nothing to fetch.
 - **Build check:** confirmed the build works as Cloudflare will run it. `vite build` followed by `wrangler deploy --dry-run` succeeds, with both bindings (the `RackOpsAgent` Durable Object and Workers AI) found.
 - **Fix:** pushed the current history to a new `main` branch.
@@ -85,6 +91,7 @@ Each entry links to the commit(s) it produced so the git history and prompt log 
 > Deploy worked, go ahead with step 2
 
 **Result:**
+
 - **Mock data:** added `data/*.csv`: 7 regions, 8 parts, 3 rack types with their BOMs, 40 forecast builds over 8 weeks, 7 fictional suppliers and 33 supply lots.
 - **Dates:** stored as day offsets from week 1. Seeding converts them to real dates, with week 1 = the coming Monday, so the demo always shows the next 8 weeks.
 - **Designed problems:**
@@ -106,6 +113,7 @@ Each entry links to the commit(s) it produced so the git history and prompt log 
 **Answer to the question:** bundling isn't strictly necessary, but it's the simplest way to meet "CSV seeded into the agent's SQL storage". The alternatives were hardcoded TypeScript arrays, fetching the files from static assets at startup, an R2 bucket, or D1. Each adds setup or moves state out of the agent for no demo benefit. In a real version, a scheduled job would load ERP or supplier-portal exports into the same tables, and the engine wouldn't change.
 
 **Result:**
+
 - **Engine:** `src/engine/readiness.ts` is a pure, deterministic engine (no LLM). Builds are processed by date, then region priority. Each build draws parts FIFO from supply lots and is graded `ready`, `at_risk` or `blocked`, with typed issues:
   - `shortage`: nothing committed at all
   - `late_commit`: the commit lands after the build date
@@ -141,6 +149,7 @@ Each entry links to the commit(s) it produced so the git history and prompt log 
 > Deploy worked, go ahead with step 4
 
 **Result:**
+
 - **Query layer:** `src/tools/queries.ts` holds pure, read-only query functions behind the chat tools. The LLM never writes SQL or does supply math. It picks a tool, and the tool returns compact JSON: capped at 25 rows, issues reduced to one-line messages. Region names are flexible ("fra", "Frankfurt" and "FRA" all work).
 - **Tools:** `src/tools/chat-tools.ts` defines five:
   - `getReadinessOverview`
@@ -160,3 +169,22 @@ Each entry links to the commit(s) it produced so the git history and prompt log 
 - **Process slip:** the first step 4 commit was pushed even though typecheck failed on a test file, because of how the commands were chained. The deployed app wasn't affected: tests passed and the build doesn't typecheck test files. Fixed in a follow-up commit, and commits now run only if every check passes.
 
 **Commits:** `feat: chat tools over readiness data + reconstructed baseline for what-changed`, `fix: test typing for tool input schema; log prompt 6`
+
+---
+
+## Prompt 7: Fix the GitHub Actions sanity check
+
+> i am getting a check ubuntu 24.04 error and that node js is deprecated, this is for the sanity check, ensure this works then proceed to step 5
+
+**Result:**
+
+- **Real failure:** the CI log showed `npm run check` failing at `oxfmt --check .` on `PROMPTS.md` and the template's own `semgrep.yml`. The assistant had only been formatting `src/`, never running the full check script CI uses. Formatted both files; the changes are whitespace only, and no prompt text changed.
+- **"Node.js 20 is deprecated":** a warning, not the failure. `actions/checkout@v4` and `actions/setup-node@v3` target Node 20. Moved to `@v5` of both (they run on Node 24) and pinned `node-version: 22`, the version the project is tested on.
+- **Also:**
+  - `npm ci` instead of `npm install`, for lockfile-exact installs
+  - npm caching
+  - `npm test` added, so CI runs the 41 unit tests
+- **Verified:** ran the exact CI steps (`npm ci && npm run check && npm test`) on a clean clone; all pass.
+- **Process change:** every commit from now on is gated on `npm run check && npm test`, the same as CI.
+
+**Commits:** `ci: fix sanity check (formatting), Node 24 actions, run tests in CI`

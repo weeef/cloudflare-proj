@@ -10,7 +10,7 @@ import { buildSeedRows, writeSeed } from "../db/seed";
 import { loadEngineInput, type SqlQuery } from "../engine/load";
 import { saveRun } from "../engine/persist";
 import { assessReadiness } from "../engine/readiness";
-import { createChatTools } from "./chat-tools";
+import { problemBuildsInput } from "./chat-tools";
 import {
   buildDetail,
   listProblemBuilds,
@@ -192,8 +192,7 @@ describe("whatChanged", () => {
 
 describe("chat tool input tolerance (what Llama tends to send)", () => {
   it("treats null / '' / 'any' as omitted and coerces numeric strings", async () => {
-    const tools = createChatTools(query);
-    const parsed = tools.listProblemBuilds.inputSchema.parse({
+    const parsed = problemBuildsInput.parse({
       geo: null,
       region: "",
       fromWeek: "1",
@@ -204,9 +203,6 @@ describe("chat tool input tolerance (what Llama tends to send)", () => {
   });
 
   it("rejects nonsense weeks", () => {
-    const tools = createChatTools(query);
-    expect(() =>
-      tools.listProblemBuilds.inputSchema.parse({ fromWeek: 12 })
-    ).toThrow();
+    expect(() => problemBuildsInput.parse({ fromWeek: 12 })).toThrow();
   });
 });

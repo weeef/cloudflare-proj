@@ -36,6 +36,21 @@ const opt = <T extends z.ZodType>(schema: T) =>
 const optNum = (description: string) =>
   opt(z.coerce.number().int().min(1).max(8)).describe(description);
 
+/** Exported so tests can check exactly what the model's input is parsed into. */
+export const problemBuildsInput = z.object({
+  geo: opt(z.enum(["EU", "APAC", "NA"])).describe(
+    "EU, APAC or NA. Omit for all."
+  ),
+  region: opt(z.string()).describe(
+    "Region code or city, e.g. FRA or Frankfurt. Omit for all."
+  ),
+  fromWeek: optNum("First week to include (1-8)."),
+  toWeek: optNum("Last week to include (1-8)."),
+  severity: opt(z.enum(["blocked", "at_risk", "both"])).describe(
+    "Default both."
+  )
+});
+
 export function createChatTools(query: SqlQuery) {
   return {
     getReadinessOverview: tool({
@@ -48,19 +63,7 @@ export function createChatTools(query: SqlQuery) {
     listProblemBuilds: tool({
       description:
         "List rack builds that are blocked and/or at risk, with the reason for each. Filter by geo (EU = Europe, APAC = Asia-Pacific, NA = North America), a single region, and a week range. 'Next month' means weeks 1-4.",
-      inputSchema: z.object({
-        geo: opt(z.enum(["EU", "APAC", "NA"])).describe(
-          "EU, APAC or NA. Omit for all."
-        ),
-        region: opt(z.string()).describe(
-          "Region code or city, e.g. FRA or Frankfurt. Omit for all."
-        ),
-        fromWeek: optNum("First week to include (1-8)."),
-        toWeek: optNum("Last week to include (1-8)."),
-        severity: opt(z.enum(["blocked", "at_risk", "both"])).describe(
-          "Default both."
-        )
-      }),
+      inputSchema: problemBuildsInput,
       execute: async (filter) => listProblemBuilds(query, filter)
     }),
 

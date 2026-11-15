@@ -133,3 +133,30 @@ Each entry links to the commit(s) it produced so the git history and prompt log 
   - Verified by seeding a local agent with the step 2 code, then starting the new code against the same stored data.
 
 **Commits:** `feat: deterministic readiness engine, run history, daily schedule`, `fix: upgrade path for agents seeded by an older deploy`
+
+---
+
+## Prompt 6: Step 4, chat tools
+
+> Deploy worked, go ahead with step 4
+
+**Result:**
+- **Query layer:** `src/tools/queries.ts` holds pure, read-only query functions behind the chat tools. The LLM never writes SQL or does supply math. It picks a tool, and the tool returns compact JSON: capped at 25 rows, issues reduced to one-line messages. Region names are flexible ("fra", "Frankfurt" and "FRA" all work).
+- **Tools:** `src/tools/chat-tools.ts` defines five:
+  - `getReadinessOverview`
+  - `listProblemBuilds` (filter by geo, region, weeks, severity)
+  - `getBuildDetail` (BOM, direct-ship eligibility)
+  - `getSupplierScorecard`
+  - `whatChanged`
+- **Tolerant parameters:** Llama often sends `null`, `""` or `"3"` for optional fields, so those are cleaned up before validation. I checked the JSON schema the model receives and it's clean.
+- **Agent:**
+  - The system prompt is rebuilt every message with today's date and the week → build-date calendar, so "next month" maps to weeks 1–4.
+  - Only the last 20 messages are sent to the model. All messages are still stored.
+- **"What changed" on a fresh demo:** seeding now also records a reconstructed **baseline** run dated 7 days earlier, using suppliers' original commit dates (before slips). It's labelled `trigger = "baseline"` and the tool output says so. Once real week-old daily runs exist, those are preferred. `DATA_VERSION` was bumped to 3 so the live agent re-seeds with a baseline.
+- **Verification:**
+  - 41 tests pass (14 new).
+  - Ran the real Durable Object locally without AI: it seeded at data version 3 with the baseline run and today's run.
+  - The Llama tool-calling loop itself can only be tested on Cloudflare, so it's left for the deployed site.
+- **Process slip:** the first step 4 commit was pushed even though typecheck failed on a test file, because of how the commands were chained. The deployed app wasn't affected: tests passed and the build doesn't typecheck test files. Fixed in a follow-up commit, and commits now run only if every check passes.
+
+**Commits:** `feat: chat tools over readiness data + reconstructed baseline for what-changed`, `fix: test typing for tool input schema; log prompt 6`

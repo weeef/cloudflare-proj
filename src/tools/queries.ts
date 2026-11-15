@@ -312,50 +312,142 @@ export function supplierScorecard(query: SqlQuery) {
  * Compare the latest run against a baseline about a week older: the most
  * recent run at least 6 days before the latest one, else the oldest run.
  */
-export function whatChanged(query: SqlQuery) {
+/**
+ * The pair of runs "what changed since last week" compares: the latest run
+ * vs the newest run at least 6 days older (else the oldest other run).
+ * Shared by the chat tool and the dashboard so both show the same answer.
+ */
+export function defaultComparison(query: SqlQuery) {
   const latestR = latestRun(query);
-  if (!latestR) return NO_DATA;
-  // Prefer the newest run that is at least 6 days older than the latest...
+  if (!latestR) return null;
   const [weekOld] = query<RunSummary>(
     `SELECT * FROM readiness_runs
      WHERE julianday(?) - julianday(run_at) >= 6
      ORDER BY run_id DESC LIMIT 1`,
     latestR.run_at
   );
-  // ...otherwise fall back to the oldest other run.
   const [oldest] = query<RunSummary>(
     `SELECT * FROM readiness_runs WHERE run_id <> ? ORDER BY run_id ASC LIMIT 1`,
     latestR.run_id
   );
   const baseline = weekOld ?? oldest;
-  if (!baseline) {
+  return baseline
+    ? { fromRunId: baseline.run_id, toRunId: latestR.run_id }
+    : null;
+}
+
+export function whatChanged(query: SqlQuery) {
+  if (!latestRun(query)) return NO_DATA;
+  const pair = defaultComparison(query);
+  if (!pair) {
     return {
       error:
         "Only one readiness check exists, so there is nothing to compare yet."
     };
   }
+  return {
+    ...compareRuns(query, pair.fromRunId, pair.toRunId, MAX_ROWS),
+    // Supplier slips are the usual root cause; include them for context.
+    supplier_commit_slips: commitSlips(query)
+  };
+}
+
+/** Run metadata as returned to the model / UI. */
+const runMeta = (r: RunSummary) =>
+  pick(r, [
+    "run_id",
+    "run_at",
+    "as_of",
+    "trigger",
+    "ready",
+    "at_risk",
+    "blocked"
+  ]);
+
+/**
+ * Diff two readiness runs: count deltas plus every build whose status
+ * changed, with the issues that appeared or cleared. This is the audit
+ * trail for "what changed week to week": both runs are stored snapshots,
+ * so the comparison is exact and repeatable.
+ */
+export function compareRuns(
+  query: SqlQuery,
+  fromRunId: number,
+  toRunId: number,
+  limit = Infinity
+) {
+  const [from] = query<RunSummary>(
+    `SELECT * FROM readiness_runs WHERE run_id = ?`,
+    fromRunId
+  );
+  const [to] = query<RunSummary>(
+    `SELECT * FROM readiness_runs WHERE run_id = ?`,
+    toRunId
+  );
+  if (!from || !to)
+    return { error: `Run ${!from ? fromRunId : toRunId} not found.` };
 
   const before = new Map(
-    buildsForRun(query, baseline.run_id).map((b) => [b.build_id, b])
+    buildsForRun(query, from.run_id).map((b) => [b.build_id, b])
   );
-  const after = buildsForRun(query, latestR.run_id);
+  const after = buildsForRun(query, to.run_id);
+  const msgs = (b: StoredBuildStatus) =>
+    b.issues.map((i) => i.message.replace(`${b.build_id}: `, ""));
 
   const changes = after
     .filter(
       (b) =>
         before.has(b.build_id) && before.get(b.build_id)!.status !== b.status
     )
-    .map((b) => ({
-      ...compactBuild(b),
-      previous_status: before.get(b.build_id)!.status,
-      direction:
-        rank(b.status) > rank(before.get(b.build_id)!.status)
-          ? "worse"
-          : "better"
-    }));
+    .map((b) => {
+      const prev = before.get(b.build_id)!;
+      const was = new Set(msgs(prev));
+      const now = new Set(msgs(b));
+      return {
+        build_id: b.build_id,
+        region: b.region,
+        week: b.week,
+        build_date: b.build_date,
+        previous_status: prev.status,
+        status: b.status,
+        direction: rank(b.status) > rank(prev.status) ? "worse" : "better",
+        issues_added: [...now].filter((m) => !was.has(m)),
+        issues_resolved: [...was].filter((m) => !now.has(m))
+      };
+    })
+    .sort(
+      (a, b) =>
+        (a.direction === "worse" ? 0 : 1) - (b.direction === "worse" ? 0 : 1) ||
+        a.week - b.week
+    );
 
-  // Supplier slips are the usual root cause; include them for context.
-  const slips = query<{
+  return {
+    baseline: runMeta(from),
+    latest: runMeta(to),
+    baseline_note:
+      from.trigger === "baseline"
+        ? "Baseline is a reconstructed snapshot from suppliers' original commit dates (before slips)."
+        : undefined,
+    delta: {
+      ready: to.ready - from.ready,
+      at_risk: to.at_risk - from.at_risk,
+      blocked: to.blocked - from.blocked
+    },
+    changed_count: changes.length,
+    changed_builds: changes.slice(0, limit)
+  };
+}
+
+/** Run history, newest first (for the UI's comparison pickers and trend). */
+export function listRuns(query: SqlQuery, limit = 30) {
+  return query<RunSummary>(
+    `SELECT * FROM readiness_runs ORDER BY run_id DESC LIMIT ?`,
+    limit
+  ).map(runMeta);
+}
+
+function commitSlips(query: SqlQuery) {
+  return query<{
     supplier_id: string;
     part_number: string;
     qty: number;
@@ -369,37 +461,6 @@ export function whatChanged(query: SqlQuery) {
      WHERE status = 'committed' AND commit_date > original_commit_date
      ORDER BY slip_days DESC`
   );
-
-  return {
-    baseline: pick(baseline, [
-      "run_id",
-      "run_at",
-      "trigger",
-      "ready",
-      "at_risk",
-      "blocked"
-    ]),
-    latest: pick(latestR, [
-      "run_id",
-      "run_at",
-      "trigger",
-      "ready",
-      "at_risk",
-      "blocked"
-    ]),
-    baseline_note:
-      baseline.trigger === "baseline"
-        ? "Baseline is a reconstructed snapshot from suppliers' original commit dates (before slips)."
-        : undefined,
-    delta: {
-      ready: latestR.ready - baseline.ready,
-      at_risk: latestR.at_risk - baseline.at_risk,
-      blocked: latestR.blocked - baseline.blocked
-    },
-    changed_builds: changes.slice(0, MAX_ROWS),
-    changed_count: changes.length,
-    supplier_commit_slips: slips
-  };
 }
 
 const rank = (s: Status) => ({ ready: 0, at_risk: 1, blocked: 2 })[s];

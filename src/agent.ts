@@ -70,7 +70,12 @@ import {
   type ReviewStatus
 } from "./review/store";
 import { createChatTools } from "./tools/chat-tools";
-import { weekCalendar } from "./tools/queries";
+import {
+  compareRuns,
+  defaultComparison,
+  listRuns,
+  weekCalendar
+} from "./tools/queries";
 
 /**
  * How many recent messages are sent to the model each turn. All messages are
@@ -255,6 +260,29 @@ export class RackOpsAgent extends AIChatAgent<Env, AgentState> {
   getLatestReadiness() {
     const run = latestRun(this.query);
     return run ? { run, builds: buildsForRun(this.query, run.run_id) } : null;
+  }
+
+  // ── week-to-week verification (dashboard "What changed" panel) ────────
+
+  /** Every stored readiness run, newest first, with its counts. */
+  @callable()
+  getRunHistory() {
+    return listRuns(this.query);
+  }
+
+  /**
+   * Exact diff between two stored runs. With no ids, uses the same default
+   * pair as the chat's whatChanged tool (latest vs ~a week earlier).
+   */
+  @callable()
+  compareReadiness(fromRunId?: number, toRunId?: number) {
+    const pair =
+      fromRunId && toRunId
+        ? { fromRunId, toRunId }
+        : defaultComparison(this.query);
+    if (!pair)
+      return { error: "Need at least two readiness checks to compare." };
+    return compareRuns(this.query, pair.fromRunId, pair.toRunId);
   }
 
   // ── weekly review: browser-facing (@callable) ─────────────────────────

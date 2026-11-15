@@ -13,7 +13,10 @@ import { assessReadiness } from "../engine/readiness";
 import { problemBuildsInput } from "./chat-tools";
 import {
   buildDetail,
+  compareRuns,
+  defaultComparison,
   listProblemBuilds,
+  listRuns,
   readinessOverview,
   resolveRegion,
   supplierScorecard,
@@ -162,6 +165,23 @@ describe("whatChanged", () => {
     expect(w.supplier_commit_slips.some((s) => s.supplier_id === "NXW")).toBe(
       true
     );
+  });
+
+  it("compareRuns lists issues that appeared and cleared per build", () => {
+    const c = compareRuns(query, 1, 2);
+    if ("error" in c) throw new Error(c.error);
+    expect(c.changed_count).toBe(14);
+    expect(c.changed_builds.length).toBe(14); // UI gets them all (no cap)
+    const sin = c.changed_builds.find((b) => b.build_id === "SIN-W3-COMPUTE")!;
+    expect(sin.issues_added.some((m) => m.includes("SW-TOR-100G"))).toBe(true);
+    // Worse changes are listed first.
+    expect(c.changed_builds[0].direction).toBe("worse");
+    expect(compareRuns(query, 1, 99)).toHaveProperty("error");
+  });
+
+  it("listRuns and defaultComparison", () => {
+    expect(listRuns(query).map((r) => r.trigger)).toEqual(["seed", "baseline"]);
+    expect(defaultComparison(query)).toEqual({ fromRunId: 1, toRunId: 2 });
   });
 
   it("prefers a real week-old run over the oldest one", () => {

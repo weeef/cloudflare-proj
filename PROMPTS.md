@@ -219,3 +219,25 @@ Each entry links to the commit(s) it produced so the git history and prompt log 
   - The live Llama report/email quality can only be checked on Cloudflare.
 
 **Commits (step 5):** `feat: weekly review Workflow with engine-verified options and human approval`
+
+---
+
+## Prompt 8: Step 6, dashboard + week-to-week verification
+
+> Keep it concise finish the dashboard and ensure we have some way to verify what changed week to week
+
+**Result:**
+
+- **UI:** replaced the starter chat page with a dashboard. One `useAgent` WebSocket feeds every panel; agent state pushes tell panels when to refetch.
+  - **Readiness:** region × week grid coloured by the worst status in each cell, rack counts, and click-through to each build's issues. "Run check now" and "Reset demo data" buttons.
+  - **What changed:** pick any two stored readiness checks. Shows count deltas, every build whose status moved (worse first), and the exact issues that appeared or cleared. Includes a check-history trend table. The grid can ring changed cells (▲ worse / ▼ better) against the comparison baseline.
+  - **Weekly review:** start a review, read the report (Markdown), open the supplier email drafts, approve or reject with a note, and see the facts the LLM was given (audit). "Compare to review #N" jumps to What changed with the two reviews' underlying checks selected.
+  - **Chat:** suggested questions, with tool-call chips showing which data each answer used.
+- **Backend:** `compareRuns`, `listRuns` and `defaultComparison` in `src/tools/queries.ts`. The chat's `whatChanged` tool and the dashboard share the same default comparison. New agent methods: `getRunHistory`, `compareReadiness`.
+- **Bug found while testing in a real browser:** newer Chromium returns a Promise from `scrollIntoView()`. A one-line `useEffect` returned it, and React treats an effect's return value as cleanup, so the chat panel crashed. Fixed with block bodies.
+- **Verified:**
+  - 59 tests pass and `npm run check` is clean.
+  - Ran a Playwright flow against a local agent (no AI, fallback report): grid → cell detail → what changed → start review → approve with note → new check. No browser errors.
+  - Screenshots saved in `docs/screenshots/`.
+
+**Commits:** `feat: dashboard (readiness grid, what-changed diff, review approval queue, chat)`
